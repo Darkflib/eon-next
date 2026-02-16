@@ -153,3 +153,49 @@ def test_cli_login_error(mock_client_class: Mock) -> None:
 
     assert result.exit_code != 0
     assert "Error" in result.output or "Login failed" in result.output
+
+
+@patch("eon_next.cli.EONNextClient")
+def test_cli_no_cache_flag(mock_client_class: Mock) -> None:
+    """Test CLI passes cache disable flag to client."""
+    mock_client = Mock()
+    mock_client.__enter__ = Mock(return_value=mock_client)
+    mock_client.__exit__ = Mock(return_value=None)
+    mock_client.login = Mock()
+    mock_client.get_balance = Mock(return_value={"balance": "£123.45", "currency": "GBP"})
+    mock_client_class.return_value = mock_client
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["--username", "test@example.com", "--password", "password123", "--no-cache"],
+    )
+
+    assert result.exit_code == 0
+    mock_client_class.assert_called_once_with(
+        "test@example.com",
+        "password123",
+        use_cache=False,
+    )
+
+
+@patch("eon_next.cli.EONNextClient")
+def test_cli_clear_cache_flag(mock_client_class: Mock) -> None:
+    """Test CLI clears cache before login when requested."""
+    mock_client = Mock()
+    mock_client.__enter__ = Mock(return_value=mock_client)
+    mock_client.__exit__ = Mock(return_value=None)
+    mock_client.clear_cached_auth = Mock()
+    mock_client.login = Mock()
+    mock_client.get_balance = Mock(return_value={"balance": "£123.45", "currency": "GBP"})
+    mock_client_class.return_value = mock_client
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["--username", "test@example.com", "--password", "password123", "--clear-cache"],
+    )
+
+    assert result.exit_code == 0
+    mock_client.clear_cached_auth.assert_called_once()
+    mock_client.login.assert_called_once()

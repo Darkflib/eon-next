@@ -41,12 +41,24 @@ from eon_next.client import EONNextClient
     is_flag=True,
     help="Output in JSON format.",
 )
+@click.option(
+    "--no-cache",
+    is_flag=True,
+    help="Do not use cached authentication token for this run.",
+)
+@click.option(
+    "--clear-cache",
+    is_flag=True,
+    help="Clear cached authentication token before logging in.",
+)
 def main(
     username: str,
     password: str,
     tariff: bool,
     usage: bool,
     json_output: bool,
+    no_cache: bool,
+    clear_cache: bool,
 ) -> None:
     """EON Next CLI - Retrieve electricity credit balance and account information.
 
@@ -60,7 +72,11 @@ def main(
         eon-next -u user@example.com -p password --json
     """
     try:
-        with EONNextClient(username, password) as client:
+        with EONNextClient(username, password, use_cache=not no_cache) as client:
+            if clear_cache:
+                click.echo("Clearing cached login token...", err=True)
+                client.clear_cached_auth()
+
             # Log in
             click.echo("Logging in to EON Next...", err=True)
             client.login()
