@@ -118,8 +118,8 @@ uv run mypy src/
 # Run all tests
 uv run pytest
 
-# Run with coverage
-uv run pytest --cov=eon_next tests/
+# Run with verbose output
+uv run pytest -v
 
 # Run specific test file
 uv run pytest tests/test_client.py -v
