@@ -18,9 +18,9 @@ The tool is designed to be simple, focused, and intentionally avoids over-engine
 1. **CLI Interface** (`src/eon_next/cli.py`)
    - Command-line interface built with Click
    - Handles argument parsing and user interaction
-   - Supports environment variables for credentials (EON_USERNAME, EON_PASSWORD)
+   - Supports environment variables for credentials (EON_API_KEY, EON_USERNAME, EON_PASSWORD)
    - Provides both human-readable and JSON output formats
-   - Command-line options: `--username`, `--password`, `--tariff`, `--usage`, `--json`
+   - Command-line options: `--api-key`, `--username`, `--password`, `--tariff`, `--usage`, `--json`
 
 2. **API Client** (`src/eon_next/client.py`)
    - HTTP client for EON Next website interaction
@@ -28,7 +28,8 @@ The tool is designed to be simple, focused, and intentionally avoids over-engine
    - Uses BeautifulSoup4 and lxml for HTML parsing
    - Implements context manager pattern for resource cleanup
    - Key methods:
-     - `login()` - Authenticates with EON Next
+     - `login()` - Authenticates via `obtainKrakenToken` (API key preferred; email/password
+       is no longer accepted by the API after the Auth0 migration, see issue #8)
      - `get_balance()` - Retrieves current credit balance
      - `get_tariff()` - Fetches tariff pricing (placeholder implementation)
      - `get_usage()` - Gets usage statistics (placeholder implementation)
@@ -129,7 +130,9 @@ uv sync --all-extras
 ### Security Considerations
 - Credentials should NEVER be committed to version control
 - The `--password` flag uses `hide_input=True` to prevent echoing
-- Environment variables (EON_USERNAME, EON_PASSWORD) are the recommended credential storage method
+- Environment variables (EON_API_KEY, or EON_USERNAME/EON_PASSWORD) are the recommended credential storage method
+- API keys are never written to the token cache; the cache entry is keyed on a SHA-256 prefix of the key
+- Never call `regenerateSecretKey` from code or tests: it replaces the account's only live key
 
 ### Implementation Status
 - **Fully Implemented**: Login, balance retrieval, CLI framework
