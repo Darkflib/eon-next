@@ -28,7 +28,7 @@ dev = [
 eon-next = "eon_next:main"
 
 [build-system]
-requires = ["uv_build>=0.10.3,<0.11.0"]
+requires = ["uv_build>=0.13.5,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.ruff]
