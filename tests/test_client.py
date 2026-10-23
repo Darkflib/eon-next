@@ -558,3 +558,111 @@ def test_get_usage_from_meter_readings_history(mock_client_class: Mock) -> None:
     assert usage["monthly_usage"] == "290.00 kWh"
     assert mock_client.post.call_count == 2
     client.close()
+
+
+def _graphql_error_response(message: str, status_code: int = 400) -> Mock:
+    """Build a mock httpx response carrying a single GraphQL error."""
+    response = Mock()
+    response.is_error = True
+    response.status_code = status_code
+    response.json = Mock(return_value={"errors": [{"message": message}]})
+    return response
+
+
+def test_client_requires_credentials() -> None:
+    """Test that the client needs an API key or a username and password."""
+    with pytest.raises(ValueError, match="API key"):
+        EONNextClient("test@example.com")
+
+
+def test_api_key_cache_key_is_hashed() -> None:
+    """Test that the API key itself is never used as the cache key."""
+    client = EONNextClient(api_key="sk_live_secret")
+    cache_key = client._cache_key()
+    assert cache_key.startswith("apikey:")
+    assert "sk_live_secret" not in cache_key
+    client.close()
+
+
+@patch("eon_next.client.httpx.Client")
+def test_api_key_login(mock_client_class: Mock) -> None:
+    """Test login sends only the APIKey input when an API key is configured."""
+    mock_client = Mock()
+    mock_client_class.return_value = mock_client
+
+    mock_login_response = Mock()
+    mock_login_response.is_error = False
+    mock_login_response.json = Mock(
+        return_value={"data": {"obtainKrakenToken": {"token": "jwt-token"}}}
+    )
+    mock_accounts_response = Mock()
+    mock_accounts_response.is_error = False
+    mock_accounts_response.json = Mock(
+        return_value={"data": {"viewer": {"accounts": [{"number": "A-12345678"}]}}}
+    )
+    mock_client.post.side_effect = [mock_login_response, mock_accounts_response]
+
+    client = EONNextClient(
+        "test@example.com", "password123", api_key="sk_live_test", use_cache=False
+    )
+    client.login()
+
+    assert client._logged_in
+    assert client._token == "jwt-token"
+    assert client._account_number == "A-12345678"
+    login_payload = mock_client.post.call_args_list[0].kwargs["json"]
+    assert login_payload["variables"] == {"input": {"APIKey": "sk_live_test"}}
+    client.close()
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Variable '$input' got invalid value; Field 'email' is not defined by type "
+        "'ObtainJSONWebTokenInput'.",
+        "KT-CT-1138: Please make sure the credentials are correct.",
+    ],
+)
+@patch("eon_next.client.httpx.Client")
+def test_password_login_rejected_suggests_api_key(mock_client_class: Mock, message: str) -> None:
+    """Test that a rejected email/password login points the user at API keys."""
+    mock_client = Mock()
+    mock_client_class.return_value = mock_client
+    mock_client.post.return_value = _graphql_error_response(message)
+
+    client = EONNextClient("test@example.com", "password123", use_cache=False)
+    with pytest.raises(RuntimeError, match="EON_API_KEY"):
+        client.login()
+
+    assert not client._logged_in
+    client.close()
+
+
+@patch("eon_next.client.httpx.Client")
+def test_api_key_login_api_access_disabled(mock_client_class: Mock) -> None:
+    """Test that KT-CT-11334 is reported as API access being disabled."""
+    mock_client = Mock()
+    mock_client_class.return_value = mock_client
+    mock_client.post.return_value = _graphql_error_response(
+        "KT-CT-11334: Account user API access is not enabled.", status_code=200
+    )
+
+    client = EONNextClient(api_key="sk_live_test", use_cache=False)
+    with pytest.raises(RuntimeError, match="API access is not enabled"):
+        client.login()
+
+    client.close()
+
+
+@patch("eon_next.client.httpx.Client")
+def test_other_login_errors_pass_through(mock_client_class: Mock) -> None:
+    """Test that unrelated GraphQL errors are not rewritten."""
+    mock_client = Mock()
+    mock_client_class.return_value = mock_client
+    mock_client.post.return_value = _graphql_error_response("KT-CT-1135: Invalid data.")
+
+    client = EONNextClient(api_key="sk_live_bad", use_cache=False)
+    with pytest.raises(RuntimeError, match="KT-CT-1135"):
+        client.login()
+
+    client.close()

@@ -12,17 +12,24 @@ from eon_next.client import EONNextClient
 @click.option(
     "--username",
     "-u",
-    required=True,
     envvar="EON_USERNAME",
     help="EON Next username (email). Can also be set via EON_USERNAME environment variable.",
 )
 @click.option(
     "--password",
     "-p",
-    required=True,
     envvar="EON_PASSWORD",
     hide_input=True,
     help="EON Next password. Can also be set via EON_PASSWORD environment variable.",
+)
+@click.option(
+    "--api-key",
+    "-k",
+    envvar="EON_API_KEY",
+    help=(
+        "EON Next account API key (sk_live_...). Can also be set via EON_API_KEY "
+        "environment variable. Takes precedence over username/password."
+    ),
 )
 @click.option(
     "--tariff",
@@ -52,8 +59,9 @@ from eon_next.client import EONNextClient
     help="Clear cached authentication token before logging in.",
 )
 def main(
-    username: str,
-    password: str,
+    username: str | None,
+    password: str | None,
+    api_key: str | None,
     tariff: bool,
     usage: bool,
     json_output: bool,
@@ -66,13 +74,22 @@ def main(
     electricity credit balance. Optionally, it can also fetch tariff pricing
     and usage information.
 
+    E.ON Next no longer accepts email/password for API login, so most accounts
+    need an API key (--api-key or EON_API_KEY).
+
     Examples:
+        eon-next --api-key sk_live_...
         eon-next -u user@example.com -p password
         eon-next -u user@example.com -p password --tariff --usage
         eon-next -u user@example.com -p password --json
     """
+    if not api_key and not (username and password):
+        raise click.UsageError(
+            "Provide --api-key (or EON_API_KEY), or both --username and --password."
+        )
+
     try:
-        with EONNextClient(username, password, use_cache=not no_cache) as client:
+        with EONNextClient(username, password, api_key=api_key, use_cache=not no_cache) as client:
             if clear_cache:
                 click.echo("Clearing cached login token...", err=True)
                 client.clear_cached_auth()

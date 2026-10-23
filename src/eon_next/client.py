@@ -1,6 +1,7 @@
 """EON Next API Client for retrieving account information."""
 
 import base64
+import hashlib
 import json
 import time
 from datetime import datetime, timedelta
@@ -19,7 +20,7 @@ class EONNextClient:
     GRAPHQL_URL = "https://api.eonnext-kraken.energy/v1/graphql/"
 
     LOGIN_MUTATION = """
-    mutation loginEmailAuthentication($input: ObtainJSONWebTokenInput!) {
+    mutation obtainKrakenToken($input: ObtainJSONWebTokenInput!) {
       obtainKrakenToken(input: $input) {
         payload
         refreshExpiresIn
@@ -211,16 +212,40 @@ class EONNextClient:
 
     TOKEN_CACHE_BUFFER_SECONDS = 30
 
-    def __init__(self, username: str, password: str, *, use_cache: bool = True) -> None:
+    # Kraken removed email/password from ObtainJSONWebTokenInput when E.ON Next
+    # moved sign-in to Auth0; older deployments answered with KT-CT-1138 instead.
+    PASSWORD_LOGIN_REMOVED_MARKERS = (
+        "is not defined by type 'ObtainJSONWebTokenInput'",
+        "KT-CT-1138",
+    )
+    API_ACCESS_DISABLED_MARKER = "KT-CT-11334"
+
+    def __init__(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        *,
+        api_key: str | None = None,
+        use_cache: bool = True,
+    ) -> None:
         """Initialize the EON Next client.
 
         Args:
             username: The user's email address.
             password: The user's password.
+            api_key: The account user's API key (sk_live_...). Takes precedence
+                over username/password.
             use_cache: Whether to use local token cache between runs.
+
+        Raises:
+            ValueError: If neither an API key nor a username and password are given.
         """
+        if not api_key and not (username and password):
+            raise ValueError("Provide an API key, or both a username and password.")
+
         self.username = username
         self.password = password
+        self.api_key = api_key
         self._use_cache = use_cache
         self.client = httpx.Client(follow_redirects=True, timeout=30.0)
         self._logged_in = False
@@ -241,7 +266,14 @@ class EONNextClient:
         self.client.close()
 
     def _cache_key(self) -> str:
-        """Get a stable cache key for this user."""
+        """Get a stable cache key for this user.
+
+        API keys are hashed so the secret itself is never written to the cache.
+        """
+        if self.api_key:
+            digest = hashlib.sha256(self.api_key.encode("utf-8")).hexdigest()[:16]
+            return f"apikey:{digest}"
+        assert self.username is not None
         return self.username.strip().lower()
 
     def _get_token_expiry(self, token: str) -> int | None:
@@ -426,6 +458,42 @@ class EONNextClient:
 
         return data
 
+    def _obtain_token(self) -> dict[str, Any]:
+        """Run obtainKrakenToken with the configured credentials.
+
+        Raises:
+            RuntimeError: If the API rejects the credentials, with guidance when
+                email/password login is no longer supported.
+        """
+        if self.api_key:
+            token_input: dict[str, str] = {"APIKey": self.api_key}
+        else:
+            assert self.username is not None and self.password is not None
+            token_input = {"email": self.username, "password": self.password}
+
+        try:
+            return self._graphql_request(
+                operation_name="obtainKrakenToken",
+                query=self.LOGIN_MUTATION,
+                variables={"input": token_input},
+            )
+        except RuntimeError as e:
+            message = str(e)
+            if self.api_key and self.API_ACCESS_DISABLED_MARKER in message:
+                raise RuntimeError(
+                    "Login failed: API access is not enabled for this E.ON Next account "
+                    f"({self.API_ACCESS_DISABLED_MARKER})."
+                ) from e
+            if not self.api_key and any(
+                marker in message for marker in self.PASSWORD_LOGIN_REMOVED_MARKERS
+            ):
+                raise RuntimeError(
+                    "Login failed: E.ON Next no longer accepts email/password for API "
+                    "login since moving sign-in to Auth0. Use an account API key instead "
+                    "(--api-key or EON_API_KEY). See the README for how to get one."
+                ) from e
+            raise
+
     def login(self) -> None:
         """Log in to the EON Next website.
 
@@ -462,11 +530,7 @@ class EONNextClient:
                 self._token = None
                 self.client.headers.pop("authorization", None)
 
-        data = self._graphql_request(
-            operation_name="loginEmailAuthentication",
-            query=self.LOGIN_MUTATION,
-            variables={"input": {"email": self.username, "password": self.password}},
-        )
+        data = self._obtain_token()
 
         token_data = data.get("obtainKrakenToken")
         if not isinstance(token_data, dict):

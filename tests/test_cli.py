@@ -175,6 +175,7 @@ def test_cli_no_cache_flag(mock_client_class: Mock) -> None:
     mock_client_class.assert_called_once_with(
         "test@example.com",
         "password123",
+        api_key=None,
         use_cache=False,
     )
 
@@ -198,4 +199,37 @@ def test_cli_clear_cache_flag(mock_client_class: Mock) -> None:
 
     assert result.exit_code == 0
     mock_client.clear_cached_auth.assert_called_once()
+    mock_client.login.assert_called_once()
+
+
+def test_cli_missing_credentials_mentions_api_key() -> None:
+    """Test CLI explains both credential options when none are given."""
+    runner = CliRunner()
+    result = runner.invoke(
+        main, [], env={"EON_USERNAME": "", "EON_PASSWORD": "", "EON_API_KEY": ""}
+    )
+    assert result.exit_code != 0
+    assert "--api-key" in result.output
+
+
+@patch("eon_next.cli.EONNextClient")
+def test_cli_api_key_from_env(mock_client_class: Mock) -> None:
+    """Test CLI logs in with only an API key from EON_API_KEY."""
+    mock_client = Mock()
+    mock_client.__enter__ = Mock(return_value=mock_client)
+    mock_client.__exit__ = Mock(return_value=None)
+    mock_client.login = Mock()
+    mock_client.get_balance = Mock(return_value={"balance": "£123.45", "currency": "GBP"})
+    mock_client_class.return_value = mock_client
+
+    runner = CliRunner()
+    result = runner.invoke(main, [], env={"EON_API_KEY": "sk_live_test"})
+
+    assert result.exit_code == 0
+    mock_client_class.assert_called_once_with(
+        None,
+        None,
+        api_key="sk_live_test",
+        use_cache=True,
+    )
     mock_client.login.assert_called_once()

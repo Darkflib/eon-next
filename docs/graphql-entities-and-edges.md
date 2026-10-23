@@ -6,7 +6,7 @@ This document maps the key GraphQL entities, nested relationships (edges), and f
 
 Primary operations currently used in the client:
 
-- `loginEmailAuthentication`
+- `obtainKrakenToken`
 - `getUserAccounts`
 - `smartDevicesForAccount`
 - `balanceForDevice`
@@ -30,7 +30,15 @@ Related operations observed in HAR (useful for future parsing):
 
 ## 1) Authentication Graph
 
-### Operation: `loginEmailAuthentication`
+### Operation: `obtainKrakenToken`
+
+Input (`ObtainJSONWebTokenInput`, one field only):
+
+- `APIKey` — account user API key (`sk_live_...`); what this client uses.
+- `refreshToken`, `preSignedKey`, `organizationSecretKey` — not used here.
+- `email`/`password` were removed after E.ON Next moved sign-in to Auth0
+  (checked October 2026); sending them fails with "Field 'email' is not
+  defined by type 'ObtainJSONWebTokenInput'".
 
 Mutation root:
 
@@ -167,7 +175,7 @@ Common examples seen in HAR:
 
 ## 6) Recommended Parse Order for Balance
 
-1. Authenticate (`loginEmailAuthentication`) and set token.
+1. Authenticate (`obtainKrakenToken`) and set token.
 2. Get account number (`getUserAccounts`).
 3. Read `AccountType.balance` from the selected account.
 4. If `balance == 0` and account appears smart PAYG:
